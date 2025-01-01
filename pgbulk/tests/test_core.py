@@ -1446,9 +1446,9 @@ def test_copy_with_db_defaults():
 
 
 @pytest.mark.django_db
-def test_merge():
+def test_basic_merge():
     """
-    Test that we can merge data into a table.
+    Test basic merge functionality.
     """
     res = (
         pgbulk.merge(models.TestModel)
@@ -1498,3 +1498,59 @@ def test_merge():
     assert len(res.created) == 0
     assert len(res.updated) == 0
     assert len(res.deleted) == 1
+
+
+@pytest.mark.django_db
+def test_merge_chaining():
+    """
+    Test that we can multiple WHEN clauses.
+    """
+    # We shouldn't match anything, we'll just insert.
+    base_merge = (
+        pgbulk.merge(models.TestModel)
+        .using([models.TestModel(id=1, char_field="test")])
+        .on(["char_field"])
+        .when_not_matched()
+        .insert()
+        .when_matched()
+        .update()
+        .returning()
+    )
+    res = base_merge.execute()
+    assert len(res.created) == 1
+    assert len(res.updated) == 0
+    assert len(res.deleted) == 0
+    assert res.created[0].merge_action == "INSERT"
+    assert res.created[0].char_field == "test"
+
+    # Execute again, this time we should match.
+    res = base_merge.execute()
+    assert len(res.created) == 0
+    assert len(res.updated) == 1
+    assert len(res.deleted) == 0
+    assert res.updated[0].merge_action == "UPDATE"
+    assert res.updated[0].char_field == "test"
+
+    # Match again, when matching delete, when not matched insert.
+    base_merge_2 = (
+        pgbulk.merge(models.TestModel)
+        .using([models.TestModel(id=1, char_field="test")])
+        .on(["char_field"])
+        .when_matched()
+        .delete()
+        .when_not_matched()
+        .insert()
+        .returning()
+    )
+    res = base_merge_2.execute()
+    assert len(res.created) == 0
+    assert len(res.updated) == 0
+    assert len(res.deleted) == 1
+    assert res.deleted[0].merge_action == "DELETE"
+
+    # Re-run, we should insert this time.
+    res = base_merge_2.execute()
+    assert len(res.created) == 1
+    assert len(res.updated) == 0
+    assert len(res.deleted) == 0
+    assert res.created[0].merge_action == "INSERT"

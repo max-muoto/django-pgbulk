@@ -161,17 +161,11 @@ def _compile_merge(
     """Compile a merge statement into a SQL string and arguments."""
     from pgbulk.core import _get_values_for_rows, _model_fields, _quote
 
-    curr_on = on
-    while curr_on.prev_on is not None:
-        curr_on = curr_on.prev_on
-
-    first_on = curr_on
-
     sql = (
         "MERGE INTO {table_name} target USING (VALUES {row_values_sql}) "
         "AS source ({all_field_names_sql})"
     )
-    using = first_on.using
+    using = on.using
 
     all_fields = _model_fields(using.builder.into.model)
     if not using.values:
@@ -193,10 +187,7 @@ def _compile_merge(
             all_field_names_sql=all_field_names_sql,
         )
 
-        sql += f" {_compile_on(curr_on)}"
-        while (curr_on := curr_on.next_on) is not None:
-            sql += f" {_compile_on(curr_on)}"
-
+        sql += f" {_compile_on(on)}"
         if returning is not False:
             returning = (
                 returning if returning is not True else _all_fields(using.builder.into.model)
@@ -309,8 +300,6 @@ class _MergeOn(Generic[_M]):
     fields: list[str]
     distinct_from: bool
     whens: list[_When] = dataclasses.field(default_factory=list)
-    prev_on: _MergeOn[_M] | None = None
-    next_on: _MergeOn[_M] | None = None
 
     def when_matched(self) -> _WhenMatched[_M]:
         """Add a WHEN MATCHED clause to the merge statement."""
@@ -349,30 +338,6 @@ class _MergeOn(Generic[_M]):
                 If a list, only the fields in the list are returned.
         """
         return _MergeReturning(self, fields)
-
-    def on(
-        self,
-        fields: list[str],
-        *,
-        distinct_from: bool = True,
-    ) -> _MergeOn[_M]:
-        """Add an ON clause to the merge statement.
-
-        Args:
-            fields: The fields to compare.
-            distinct_from: Whether to use `IS DISTINCT FROM` instead of `=`.
-
-        Returns:
-            The new ON clause which you can match on.
-        """
-        next = dataclasses.replace(
-            self,
-            prev_on=self,
-            fields=fields,
-            distinct_from=distinct_from,
-        )
-        self.next_on = next
-        return next
 
 
 @dataclasses.dataclass
