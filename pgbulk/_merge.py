@@ -149,10 +149,7 @@ def _compile_on(on: _MergeOn[_M]) -> str:
         if idx < len(on.fields) - 1:
             sql += " AND"
 
-    for when in on.whens_matched:
-        sql += f" {when.evaluate()}"
-
-    for when in on.whens_not_matched:
+    for when in on.whens:
         sql += f" {when.evaluate()}"
 
     return sql
@@ -223,8 +220,8 @@ class _WhenMatched(Generic[_M]):
         fields = fields or _all_fields(self.merge_on.using.builder.into.model)
         return dataclasses.replace(
             self.merge_on,
-            whens_matched=[
-                *self.merge_on.whens_matched,
+            whens=[
+                *self.merge_on.whens,
                 _When(
                     condition="MATCHED",
                     by="TARGET",
@@ -237,8 +234,8 @@ class _WhenMatched(Generic[_M]):
         """Add a DELETE clause to the merge statement."""
         return dataclasses.replace(
             self.merge_on,
-            whens_matched=[
-                *self.merge_on.whens_matched,
+            whens=[
+                *self.merge_on.whens,
                 _When(condition="MATCHED", by="TARGET", then=_Delete()),
             ],
         )
@@ -247,8 +244,8 @@ class _WhenMatched(Generic[_M]):
         """Add a DO NOTHING clause to the merge statement."""
         return dataclasses.replace(
             self.merge_on,
-            whens_matched=[
-                *self.merge_on.whens_matched,
+            whens=[
+                *self.merge_on.whens,
                 _When(condition="MATCHED", by="TARGET", then=_DoNothing()),
             ],
         )
@@ -267,8 +264,8 @@ class _WhenNotMatched(Generic[_M]):
         values = [f"source.{field}" for field in columns]
         return dataclasses.replace(
             self.merge_on,
-            whens_not_matched=[
-                *self.merge_on.whens_not_matched,
+            whens=[
+                *self.merge_on.whens,
                 _When(condition="NOT MATCHED", by=self.by, then=_Insert(columns, values)),
             ],
         )
@@ -277,8 +274,8 @@ class _WhenNotMatched(Generic[_M]):
         """Add a DO NOTHING clause to the merge statement."""
         return dataclasses.replace(
             self.merge_on,
-            whens_not_matched=[
-                *self.merge_on.whens_not_matched,
+            whens=[
+                *self.merge_on.whens,
                 _When(condition="NOT MATCHED", by=self.by, then=_DoNothing()),
             ],
         )
@@ -311,8 +308,7 @@ class _MergeOn(Generic[_M]):
     using: _MergeUsing[_M]
     fields: list[str]
     distinct_from: bool
-    whens_matched: list[_When] = dataclasses.field(default_factory=list)
-    whens_not_matched: list[_When] = dataclasses.field(default_factory=list)
+    whens: list[_When] = dataclasses.field(default_factory=list)
     prev_on: _MergeOn[_M] | None = None
     next_on: _MergeOn[_M] | None = None
 
