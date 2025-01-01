@@ -1453,11 +1453,11 @@ def test_merge():
     res = (
         pgbulk.merge(models.TestModel)
         .using(
-            models.TestModel.objects.all(),
+            [models.TestModel(id=1, char_field="test")],
         )
         .on(["id"])
         .when_not_matched(by="TARGET")
-        .insert()
+        .do_nothing()
         .on(["id", "char_field"])
         .when_matched()
         .delete()
