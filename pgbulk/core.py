@@ -26,13 +26,14 @@ from django.db.models.sql.compiler import SQLCompiler
 from django.utils import timezone
 from django.utils.version import get_version_tuple
 from typing_extensions import Final, TypeAlias
+from pgbulk import _merge
 
-from pgbulk._merge import MergeBuilder
 
 UpdateFieldsTypeDef: TypeAlias = Union[
     List[str], List["UpdateField"], List[Union["UpdateField", str]], None
 ]
 _M = TypeVar("_M", bound=models.Model)
+
 QuerySet: TypeAlias = Union[Type[_M], models.QuerySet[_M]]
 AnyField: TypeAlias = "models.Field[Any, Any]"
 Expression: TypeAlias = "models.Expression | models.F"
@@ -1059,19 +1060,19 @@ async def acopy(
     )
 
 
-def merge(into: QuerySet[_M]) -> MergeBuilder[_M]:
+def merge(into: QuerySet[_M], using: _merge.Values[_M]) -> _merge.MergeUsing[_M]:
     """Build a merge statement.
 
     Args:
         into: A queryset for the table being merged into.
     """
     into = into if isinstance(into, models.QuerySet) else into.objects.all()
-    return MergeBuilder(into)
+    return _merge.build(into, using)
 
 
-async def amerge(into: QuerySet[_M]) -> MergeBuilder[_M]:
+async def amerge(into: QuerySet[_M], using: _merge.Values[_M]) -> _merge.MergeUsing[_M]:
     """Asynchronously build a merge statement.
 
     See [pgbulk.merge][]
     """
-    return await sync_to_async(merge)(into)
+    return await sync_to_async(merge)(into, using)

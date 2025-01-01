@@ -1451,8 +1451,7 @@ def test_basic_merge():
     Test basic merge functionality.
     """
     res = (
-        pgbulk.merge(models.TestModel)
-        .using([models.TestModel(id=1, char_field="test")])
+        pgbulk.merge(models.TestModel, [models.TestModel(id=1, char_field="test")])
         .on(["char_field"])
         .when_not_matched()
         .insert()
@@ -1471,8 +1470,7 @@ def test_basic_merge():
     assert res.created[0].time_zone == "UTC"
 
     res = (
-        pgbulk.merge(models.TestModel)
-        .using([models.TestModel(id=1, char_field="test", int_field=2)])
+        pgbulk.merge(models.TestModel, [models.TestModel(id=1, char_field="test", int_field=2)])
         .on(["char_field"])
         .when_matched()
         .update()
@@ -1487,8 +1485,7 @@ def test_basic_merge():
     assert res.updated[0].int_field == 2
 
     res = (
-        pgbulk.merge(models.TestModel)
-        .using([models.TestModel(id=1, char_field="test", int_field=2)])
+        pgbulk.merge(models.TestModel, [models.TestModel(id=1, char_field="test", int_field=2)])
         .on(["char_field"])
         .when_matched()
         .delete()
@@ -1507,8 +1504,7 @@ def test_merge_chaining():
     """
     # We shouldn't match anything, we'll just insert.
     base_merge = (
-        pgbulk.merge(models.TestModel)
-        .using([models.TestModel(id=1, char_field="test")])
+        pgbulk.merge(models.TestModel, [models.TestModel(id=1, char_field="test")])
         .on(["char_field"])
         .when_not_matched()
         .insert()
@@ -1533,8 +1529,7 @@ def test_merge_chaining():
 
     # Match again, when matching delete, when not matched insert.
     base_merge_2 = (
-        pgbulk.merge(models.TestModel)
-        .using([models.TestModel(id=1, char_field="test")])
+        pgbulk.merge(models.TestModel, [models.TestModel(id=1, char_field="test")])
         .on(["char_field"])
         .when_matched()
         .delete()

@@ -15,6 +15,8 @@ _M = TypeVar("_M", bound=models.Model)
 
 Values: TypeAlias = "QuerySet[_M] | Iterable[_M]"
 
+MergeUsing: TypeAlias = "_MergeUsing[_M]"
+
 
 @dataclasses.dataclass
 class _Update:
@@ -167,31 +169,29 @@ def _compile_merge(
     )
     using = on.using
 
-    all_fields = _model_fields(using.builder.into.model)
+    all_fields = _model_fields(using.into.model)
     if not using.values:
         return None
 
     row_values, sql_args = _get_values_for_rows(
-        using.builder.into,
+        using.into,
         using.values,
         # TODO: Revaluate this potentially.
         all_fields,
     )
 
-    with connections[using.builder.into.db].cursor() as cursor:
+    with connections[using.into.db].cursor() as cursor:
         row_values_sql = ", ".join(row_values)
         all_field_names_sql = ", ".join([_quote(field.column, cursor) for field in all_fields])
         sql = sql.format(
-            table_name=_quote(using.builder.into.model._meta.db_table, cursor),
+            table_name=_quote(using.into.model._meta.db_table, cursor),
             row_values_sql=row_values_sql,
             all_field_names_sql=all_field_names_sql,
         )
 
         sql += f" {_compile_on(on)}"
         if returning is not False:
-            returning = (
-                returning if returning is not True else _all_fields(using.builder.into.model)
-            )
+            returning = returning if returning is not True else _all_fields(using.into.model)
             sql += " RETURNING merge_action()"
             if len(returning) > 1:
                 sql += ","
@@ -208,7 +208,7 @@ class _WhenMatched(Generic[_M]):
 
     def update(self, fields: list[str] | None = None) -> _MergeOn[_M]:
         """Add an UPDATE clause to the merge statement."""
-        fields = fields or _all_fields(self.merge_on.using.builder.into.model)
+        fields = fields or _all_fields(self.merge_on.using.into.model)
         return dataclasses.replace(
             self.merge_on,
             whens=[
@@ -251,7 +251,7 @@ class _WhenNotMatched(Generic[_M]):
 
     def insert(self) -> _MergeOn[_M]:
         """Add an INSERT clause to the merge statement."""
-        columns = _all_fields(self.merge_on.using.builder.into.model)
+        columns = _all_fields(self.merge_on.using.into.model)
         values = [f"source.{field}" for field in columns]
         return dataclasses.replace(
             self.merge_on,
@@ -285,7 +285,7 @@ class _MergeReturning(Generic[_M]):
         if compiled is None:
             return _MergeResult([])
 
-        with connections[self.merge_on.using.builder.into.db].cursor() as cursor:
+        with connections[self.merge_on.using.into.db].cursor() as cursor:
             mogrified_query = cursor.mogrify(compiled.sql, compiled.sql_args)
             print("mogrified_query", mogrified_query)
             cursor.execute(compiled.sql, compiled.sql_args)
@@ -327,7 +327,7 @@ class _MergeOn(Generic[_M]):
         if compiled is None:
             return
 
-        with connections[self.using.builder.into.db].cursor() as cursor:
+        with connections[self.using.into.db].cursor() as cursor:
             cursor.execute(compiled.sql, compiled.sql_args)
 
     def returning(self, fields: list[str] | bool = True) -> _MergeReturning[_M]:
@@ -344,8 +344,8 @@ class _MergeOn(Generic[_M]):
 class _MergeUsing(Generic[_M]):
     """`USING` part of a merge statement."""
 
+    into: models.QuerySet[_M]
     values: Values[_M]
-    builder: MergeBuilder[_M]
 
     def on(
         self,
@@ -365,19 +365,14 @@ class _MergeUsing(Generic[_M]):
         return _MergeOn(self, fields, distinct_from)
 
 
-@dataclasses.dataclass
-class MergeBuilder(Generic[_M]):
-    """Base for merge statement builders."""
+def build(into: models.QuerySet[_M], values: Values[_M]) -> _MergeUsing[_M]:
+    """Build a merge statement.
 
-    into: models.QuerySet[_M]
+    Args:
+        into: The queryset to merge into.
+        values: The values to merge, either a queryset or an iterable of model instances.
 
-    def using(self, values: Values[_M]) -> _MergeUsing[_M]:
-        """Construct a merge statement.
-
-        Args:
-            values: The values to merge, either a queryset or an iterable of model instances.
-
-        Returns:
-            A merge statement builder.
-        """
-        return _MergeUsing(values, self)
+    Returns:
+        A merge statement builder.
+    """
+    return _MergeUsing(into, values)
