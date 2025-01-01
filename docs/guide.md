@@ -228,3 +228,34 @@ pgbulk.copy(
 !!! note
 
     Columns that are excluded from the copy must be generated, nullable, or have database defaults.
+
+
+## Using `pgbulk.merge`
+
+[pgbulk.merge][] issues a `MERGE INTO ... USING ... ON ... WHEN MATCHED ... WHEN NOT MATCHED ...` statement. Merge can often be used as a more flexible alternative to `upsert`, allowing for conditional matching of conditions without requiring a unique constraint.
+
+!!! note
+
+    `pgbulk.merge` is only supported in Postgres 15 and above. The `returning()` method is only supported in Postgres 17 and above.
+
+#### Merge rows into a table
+
+```python
+import pgbulk
+
+```python
+pgbulk.merge(
+    models.TestModel,
+    [
+        models.TestModel(id=1, char_field="test", int_field=2),
+        models.TestModel(id=2, char_field="test2", int_field=3),
+        models.TestModel(id=3, char_field="test3", int_field=4),
+    ]
+).on(["char_field"])
+ .when_not_matched()
+ .insert()
+ .when_matched()
+ .update()
+ .returning()
+ .execute()
+```

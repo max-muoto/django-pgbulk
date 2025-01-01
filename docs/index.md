@@ -65,6 +65,26 @@ pgbulk.copy(
 )
 ```
 
+#### Merge rows into a table
+
+```python
+import pgbulk
+
+pgbulk.merge(
+    MyModel,
+    [
+        MyModel(id=1, some_attr="some_val1"),
+    ]
+).on(["some_attr"])
+# When the row is not matched on `some_attr`, insert it.
+# Otherwise, update it with the new values.
+.when_not_matched()
+.insert()
+.when_matched()
+.update()
+.execute()
+```
+
 ### Advanced Features
 
 Here are some advanced features at a glance:
@@ -72,6 +92,7 @@ Here are some advanced features at a glance:
 - [pgbulk.upsert][] can categorize which rows were inserted or updated.
 - [pgbulk.upsert][] and [pgbulk.update][] can ignore updating unchanged fields.
 - [pgbulk.upsert][] and [pgbulk.update][] can use expressions in updates.
+- [pgbulk.merge][] can chain multiple `WHEN` clauses.
 
 ## Compatibility
 
