@@ -1452,15 +1452,49 @@ def test_merge():
     """
     res = (
         pgbulk.merge(models.TestModel)
-        .using(
-            [models.TestModel(id=1, char_field="test")],
-        )
-        .on(["id"])
-        .when_not_matched(by="TARGET")
-        .do_nothing()
-        .on(["id", "char_field"])
+        .using([models.TestModel(id=1, char_field="test")])
+        .on(["char_field"])
+        .when_not_matched()
+        .insert()
+        .returning()
+        .execute()
+    )
+    assert len(res.created) == 1
+    assert len(res.updated) == 0
+    assert len(res.deleted) == 0
+    assert res.created[0].merge_action == "INSERT"
+    assert res.created[0].char_field == "test"
+    assert res.created[0].int_field is None
+    assert res.created[0].float_field is None
+    # assert res.created[0].json_field == {}
+    assert res.created[0].array_field == []
+    assert res.created[0].time_zone == "UTC"
+
+    res = (
+        pgbulk.merge(models.TestModel)
+        .using([models.TestModel(id=1, char_field="test", int_field=2)])
+        .on(["char_field"])
+        .when_matched()
+        .update()
+        .returning()
+        .execute()
+    )
+    assert len(res.created) == 0
+    assert len(res.updated) == 1
+    assert len(res.deleted) == 0
+    assert res.updated[0].merge_action == "UPDATE"
+    assert res.updated[0].char_field == "test"
+    assert res.updated[0].int_field == 2
+
+    res = (
+        pgbulk.merge(models.TestModel)
+        .using([models.TestModel(id=1, char_field="test", int_field=2)])
+        .on(["char_field"])
         .when_matched()
         .delete()
         .returning()
         .execute()
     )
+    assert len(res.created) == 0
+    assert len(res.updated) == 0
+    assert len(res.deleted) == 1
