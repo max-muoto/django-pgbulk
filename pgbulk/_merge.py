@@ -22,24 +22,49 @@ class _Update:
 
     def evaluate(self) -> str:
         sql = "UPDATE SET"
-        for field in self.fields:
-            sql += f" target.{field} = source.{field}"
+        for idx, field in enumerate(self.fields):
+            sql += f" {field} = source.{field}"
+            if idx < len(self.fields) - 1:
+                sql += ","
         return sql
 
 
-class _Delete: ...
+@dataclasses.dataclass
+class _Insert:
+    columns: list[str]
+    values: list[str]
+
+    def evaluate(self) -> str:
+        sql = "INSERT"
+        if self.columns:
+            sql += " ("
+            sql += ", ".join(self.columns)
+            sql += ") VALUES"
+        else:
+            sql += " VALUES"
+
+        if self.values:
+            sql += " ("
+            sql += ", ".join(self.values)
+            sql += ")"
+
+        return sql
 
 
-class _DoNothing: ...
+class _Delete:
+    def evaluate(self) -> str:
+        return "DELETE"
 
 
-class _Insert: ...
+class _DoNothing:
+    def evaluate(self) -> str:
+        return "DO NOTHING"
 
 
 class _Row(NamedTuple):
     """A row returned from a merge operation."""
 
-    status: Literal["c", "u", "d"]
+    merge_action: Literal["UPDATE", "INSERT", "DELETE", "DO NOTHING"]
     """The status of the row.
 
     - `c`: Created
@@ -57,15 +82,15 @@ class _MergeResult(list[_Row]):
 
     @property
     def created(self) -> list[_Row]:
-        return [i for i in self if i.status == "c"]
+        return [i for i in self if i.merge_action == "INSERT"]
 
     @property
     def updated(self) -> list[_Row]:
-        return [i for i in self if i.status == "u"]
+        return [i for i in self if i.merge_action == "UPDATE"]
 
     @property
     def deleted(self) -> list[_Row]:
-        return [i for i in self if i.status == "d"]
+        return [i for i in self if i.merge_action == "DELETE"]
 
     @classmethod
     def from_cursor(cls, cursor: CursorWrapper) -> Self:
@@ -100,19 +125,11 @@ class _When:
     then: _DoNothing | _Update | _Delete | _Insert
 
     def evaluate(self) -> str:
-        sql = f"WHEN {self.condition} BY {self.by} THEN"
-
-        if isinstance(self.then, _DoNothing):
-            sql += " DO NOTHING"
-        elif isinstance(self.then, _Update):
-            sql += f" UPDATE SET {', '.join(self.then.fields)}"
-        elif isinstance(self.then, _Delete):
-            sql += " DELETE"
-        elif isinstance(self.then, _Insert):  # type: ignore
-            sql += " INSERT"
-        else:
-            raise AssertionError("Invalid THEN clause")
-
+        sql = f"WHEN {self.condition}"
+        # Target is implicit.
+        if self.by == "SOURCE":
+            sql += " BY SOURCE"
+        sql += f" THEN {self.then.evaluate()}"
         return sql
 
 
@@ -126,7 +143,7 @@ class _CompiledMerge(NamedTuple):
 def _compile_on(on: _MergeOn[_M]) -> str:
     """Compile an ON clause into a SQL string."""
     sql = "ON"
-    sign = "=" if not on.distinct_from else "IS DISTINCT FROM"
+    sign = "=" if not on.distinct_from else "IS NOT DISTINCT FROM"
     for idx, field in enumerate(on.fields):
         sql += f" source.{field} {sign} target.{field}"
         if idx < len(on.fields) - 1:
@@ -178,6 +195,8 @@ def _compile_merge(
             row_values_sql=row_values_sql,
             all_field_names_sql=all_field_names_sql,
         )
+
+        sql += f" {_compile_on(curr_on)}"
         while (curr_on := curr_on.next_on) is not None:
             sql += f" {_compile_on(curr_on)}"
 
@@ -200,6 +219,7 @@ class _WhenMatched(Generic[_M]):
     merge_on: _MergeOn[_M]
 
     def update(self, fields: list[str] | None = None) -> _MergeOn[_M]:
+        """Add an UPDATE clause to the merge statement."""
         fields = fields or _all_fields(self.merge_on.using.builder.into.model)
         return dataclasses.replace(
             self.merge_on,
@@ -214,6 +234,7 @@ class _WhenMatched(Generic[_M]):
         )
 
     def delete(self) -> _MergeOn[_M]:
+        """Add a DELETE clause to the merge statement."""
         return dataclasses.replace(
             self.merge_on,
             whens_matched=[
@@ -223,6 +244,7 @@ class _WhenMatched(Generic[_M]):
         )
 
     def do_nothing(self) -> _MergeOn[_M]:
+        """Add a DO NOTHING clause to the merge statement."""
         return dataclasses.replace(
             self.merge_on,
             whens_matched=[
@@ -240,15 +262,19 @@ class _WhenNotMatched(Generic[_M]):
     by: Literal["SOURCE", "TARGET"] = "TARGET"
 
     def insert(self) -> _MergeOn[_M]:
+        """Add an INSERT clause to the merge statement."""
+        columns = _all_fields(self.merge_on.using.builder.into.model)
+        values = [f"source.{field}" for field in columns]
         return dataclasses.replace(
             self.merge_on,
             whens_not_matched=[
                 *self.merge_on.whens_not_matched,
-                _When(condition="NOT MATCHED", by=self.by, then=_Insert()),
+                _When(condition="NOT MATCHED", by=self.by, then=_Insert(columns, values)),
             ],
         )
 
     def do_nothing(self) -> _MergeOn[_M]:
+        """Add a DO NOTHING clause to the merge statement."""
         return dataclasses.replace(
             self.merge_on,
             whens_not_matched=[
@@ -266,6 +292,7 @@ class _MergeReturning(Generic[_M]):
     fields: list[str] | bool
 
     def execute(self) -> _MergeResult:
+        """Execute the merge statement and return the result."""
         compiled = _compile_merge(self.merge_on, returning=self.fields)
         if compiled is None:
             return _MergeResult([])
@@ -290,6 +317,7 @@ class _MergeOn(Generic[_M]):
     next_on: _MergeOn[_M] | None = None
 
     def when_matched(self) -> _WhenMatched[_M]:
+        """Add a WHEN MATCHED clause to the merge statement."""
         return _WhenMatched(self)
 
     def when_not_matched(
@@ -297,9 +325,19 @@ class _MergeOn(Generic[_M]):
         *,
         by: Literal["SOURCE", "TARGET"] = "TARGET",
     ) -> _WhenNotMatched[_M]:
+        """Add a WHEN NOT MATCHED clause to the merge statement.
+
+        Args:
+            by: The side to match on (SOURCE being the row from the VALUES clause, TARGET being the
+                row from the target table).
+
+        Returns:
+            The new WHEN NOT MATCHED clause which you can match on.
+        """
         return _WhenNotMatched(merge_on=self, by=by)
 
     def execute(self) -> None:
+        """Execute the merge statement."""
         compiled = _compile_merge(self)
         if compiled is None:
             return
@@ -322,6 +360,15 @@ class _MergeOn(Generic[_M]):
         *,
         distinct_from: bool = True,
     ) -> _MergeOn[_M]:
+        """Add an ON clause to the merge statement.
+
+        Args:
+            fields: The fields to compare.
+            distinct_from: Whether to use `IS DISTINCT FROM` instead of `=`.
+
+        Returns:
+            The new ON clause which you can match on.
+        """
         next = dataclasses.replace(
             self,
             prev_on=self,
