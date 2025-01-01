@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import itertools
 import re
 from typing import (
@@ -24,6 +26,8 @@ from django.db.models.sql.compiler import SQLCompiler
 from django.utils import timezone
 from django.utils.version import get_version_tuple
 from typing_extensions import Final, TypeAlias
+
+from pgbulk._merge import MergeBuilder
 
 UpdateFieldsTypeDef: TypeAlias = Union[
     List[str], List["UpdateField"], List[Union["UpdateField", str]], None
@@ -1053,3 +1057,21 @@ async def acopy(
         exclude=exclude,
         binary=binary,
     )
+
+
+def merge(into: QuerySet[_M]) -> MergeBuilder[_M]:
+    """Build a merge statement.
+
+    Args:
+        into: A queryset for the table being merged into.
+    """
+    into = into if isinstance(into, models.QuerySet) else into.objects.all()
+    return MergeBuilder(into)
+
+
+async def amerge(into: QuerySet[_M]) -> MergeBuilder[_M]:
+    """Asynchronously build a merge statement.
+
+    See [pgbulk.merge][]
+    """
+    return await sync_to_async(merge)(into)

@@ -4,7 +4,7 @@ import ddf
 import freezegun
 import pytest
 from asgiref.sync import async_to_sync
-from django import __version__ as DJANGO_VERSION
+from django import __version__ as DJANGO_VERSION, db
 from django.db import transaction
 from django.db.models import F
 from pytz import timezone
@@ -1443,3 +1443,24 @@ def test_copy_with_db_defaults():
         ["int_field"],
     )
     assert models.TestDbDefaultModelWithOrmDefault.objects.get().int_field == 1
+
+
+@pytest.mark.django_db
+def test_merge():
+    """
+    Test that we can merge data into a table.
+    """
+    res = (
+        pgbulk.merge(models.TestModel)
+        .using(
+            models.TestModel.objects.all(),
+        )
+        .on(["id"])
+        .when_not_matched(by="TARGET")
+        .insert()
+        .on(["id", "char_field"])
+        .when_matched()
+        .delete()
+        .returning()
+        .execute()
+    )
